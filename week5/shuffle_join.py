@@ -12,10 +12,18 @@ spark = SparkSession \
 df_large = spark.read.json("large_data/")
 df_small = spark.read.json("small_data/")
 
+import time
+
+# Start the timer
+start = time.perf_counter()
+
 join_expr = df_large.id == df_small.id
 join_df = df_large.join(df_small, join_expr, "inner")
 
 join_df.collect()
+# End the timer and calculate duration
+end = time.perf_counter()
+print(f"Shuffle Join Execution Time: {end - start:.4f} seconds")
 input("Waiting ...")
 
 spark.stop()
