@@ -1,41 +1,30 @@
+import os, time
+os.environ["SPARK_LOCAL_IP"] = "127.0.0.1"
+
 from pyspark.sql import SparkSession
 
-# Use metastore
 spark = SparkSession.builder \
     .appName("AQE Coalesce Demo") \
     .enableHiveSupport() \
-    .config("spark.driver.memory", "1g") \
-    .config("spark.executor.memory", "4g") \
+    .config("spark.sql.warehouse.dir", os.path.abspath("spark-warehouse")) \
+    .config("spark.sql.shuffle.partitions", "200") \
     .getOrCreate()
 
-print("AQE enabled:", spark.conf.get("spark.sql.adaptive.enabled"))
-print("Coalesce enabled:", spark.conf.get("spark.sql.adaptive.coalescePartitions.enabled"))
-print("Default Parallelism:", spark.sparkContext.defaultParallelism)
-print("Number of partitions during shuffle:", spark.conf.get("spark.sql.shuffle.partitions"))
-print("Size of a partition:", spark.conf.get("spark.sql.files.maxPartitionBytes"))
-
-# show ERROR messages only
 spark.sparkContext.setLogLevel("ERROR")
-
-# create and use database named demo
 spark.sql("USE demo")
 
-# Run with AQE coalesce Partition on
-df = spark.sql("""
-SELECT date, sum(quantity) AS q
-FROM sales
-GROUP BY 1
-ORDER BY 2 DESC;
-""")
-print("num partitions with coalesce Partition on:", df.rdd.getNumPartitions())
+def run_bench(is_enabled):
+    spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", str(is_enabled).lower())
+    print(f"\n--- Coalesce Enabled: {is_enabled} ---")
+    start = time.perf_counter()
+    df = spark.sql("SELECT date, sum(quantity) AS q FROM sales GROUP BY 1 ORDER BY 2 DESC")
+    df.collect()
+    end = time.perf_counter()
+    print(f"Final Partitions: {df.rdd.getNumPartitions()}")
+    print(f"Time: {end - start:.4f}s")
 
-# Run with AQE coalesce Partition off
-spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "false")
+run_bench(True)
+run_bench(False)
 
-df = spark.sql("""
-SELECT date, sum(quantity) AS q
-FROM sales
-GROUP BY 1
-ORDER BY 2 DESC;
-""")
-print("num partitions coalesce Partition off:", df.rdd.getNumPartitions())
+input("\nInspect http://localhost:4040. Press Enter to exit...")
+spark.stop()

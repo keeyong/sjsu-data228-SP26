@@ -1,50 +1,41 @@
+import os
+# Force Spark to bind to localhost
+os.environ["SPARK_LOCAL_IP"] = "127.0.0.1"
+
 from pyspark.sql import SparkSession
 
-# Use metastore
 spark = SparkSession.builder \
-    .appName("create-parquet-tables") \
+    .appName("gen-sample-data-10M") \
     .enableHiveSupport() \
-    .config("spark.driver.memory", "1g") \
-    .config("spark.executor.memory", "4g") \
+    .config("spark.driver.memory", "4g") \
+    .config("spark.executor.memory", "8g") \
+    .config("spark.sql.warehouse.dir", os.path.abspath("spark-warehouse")) \
     .getOrCreate()
 
-print("AQE enabled:", spark.conf.get("spark.sql.adaptive.enabled", "false"))
-print("Coalesce enabled:", spark.conf.get("spark.sql.adaptive.coalescePartitions.enabled", "false"))
-print("Default Parallelism:", spark.sparkContext.defaultParallelism)
-print("Number of partitions during shuffle:", spark.conf.get("spark.sql.shuffle.partitions"))
-print("Size of a partition:", spark.conf.get("spark.sql.files.maxPartitionBytes", None))
-
-# create and use database named demo
 spark.sql("CREATE DATABASE IF NOT EXISTS demo")
 spark.sql("USE demo")
 
-# create a table named items (parquet)
+# Scaled to 300,000 items
+print("Generating 300K row Items table...")
 spark.sql("""
-CREATE TABLE IF NOT EXISTS items
-USING parquet
-AS
-SELECT
-  id,
-  CAST(rand() * 1000 AS INT) AS price
-FROM RANGE(30000000)
+CREATE TABLE IF NOT EXISTS items USING parquet AS
+SELECT id, CAST(rand() * 1000 AS INT) AS price FROM RANGE(300000)
 """)
-items_df = spark.table("items")   # or spark.sql("SELECT * FROM items")
-print("num partitions:", items_df.rdd.getNumPartitions())
 
+# Scaled to 10,000,000 sales
+print("Generating 10M row skewed Sales table...")
 spark.sql("""
-CREATE TABLE IF NOT EXISTS sales
-USING parquet
-AS
+CREATE TABLE IF NOT EXISTS sales USING parquet AS
 SELECT
-  CASE
-    WHEN rand() < 0.8 THEN 100
-    ELSE CAST(rand() * 30000000 AS INT)
+  CASE 
+    WHEN rand() < 0.8 THEN 100 
+    ELSE CAST(rand() * 300000 AS INT) 
   END AS item_id,
   CAST(rand() * 100 AS INT) AS quantity,
   DATE_ADD(current_date(), - CAST(rand() * 360 AS INT)) AS date
-FROM RANGE(1000000000)
+FROM RANGE(10000000)
 """)
-sales_df = spark.table("sales")   # or spark.sql("SELECT * FROM sales")
-print("num partitions:", sales_df.rdd.getNumPartitions())
 
-print("Done. Tables created: demo.items, demo.sales")
+print(f"Tables saved permanently in: {os.path.abspath('spark-warehouse')}")
+input("Wait for UI inspection at http://localhost:4040. Press Enter to stop...")
+spark.stop()

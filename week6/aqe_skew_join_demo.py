@@ -1,50 +1,33 @@
-from pyspark.sql import SparkSession
-import time
+import os, time
+os.environ["SPARK_LOCAL_IP"] = "127.0.0.1"
 
-# Use metastore
-# Set driver memory to 4G and executor memory to 8G
+from pyspark.sql import SparkSession
+
 spark = SparkSession.builder \
-    .appName("AQE Skew JOIN Demo") \
+    .appName("AQE Skew Join Demo") \
     .enableHiveSupport() \
     .config("spark.driver.memory", "4g") \
     .config("spark.executor.memory", "8g") \
+    .config("spark.sql.warehouse.dir", os.path.abspath("spark-warehouse")) \
     .getOrCreate()
 
-# Print a few configuration parameters
-print("AQE enabled:", spark.conf.get("spark.sql.adaptive.enabled"))
-print("AQE skewJoin Partition Factor:", spark.conf.get("spark.sql.adaptive.skewJoin.skewedPartitionFactor"))
-print("AQE skewJoin Partition Threshold:", spark.conf.get("spark.sql.adaptive.skewJoin.skewedPartitionThresholdInBytes"))
-
-# Show error message only 
 spark.sparkContext.setLogLevel("ERROR")
-
-# Create and use database named demo
 spark.sql("USE demo")
 
-# Run with AQE on
-start = time.time()
-df = spark.sql("""
-SELECT date, sum(quantity * price) AS total_sales
-FROM sales s
-JOIN items i ON s.item_id = i.id
-GROUP BY 1
-ORDER BY 2 DESC;
-""")
-print("num partitions:", df.rdd.getNumPartitions())
-end = time.time()
-print("Runtime:", end - start, "seconds")
+def run_skew_bench(aqe_on):
+    spark.conf.set("spark.sql.adaptive.enabled", str(aqe_on).lower())
+    print(f"\n--- AQE Skew Join Enabled: {aqe_on} ---")
+    start = time.perf_counter()
+    df = spark.sql("""
+        SELECT date, sum(quantity * price) AS total_sales
+        FROM sales s JOIN items i ON s.item_id = i.id
+        GROUP BY 1 ORDER BY 2 DESC
+    """)
+    df.collect()
+    print(f"Execution Time: {time.perf_counter() - start:.4f}s")
 
-# Run with AQE off
-spark.conf.set("spark.sql.adaptive.enabled", "false")
+run_skew_bench(True)
+run_skew_bench(False)
 
-start = time.time()
-df = spark.sql("""
-SELECT date, sum(quantity * price) AS total_sales
-FROM sales s
-JOIN items i ON s.item_id = i.id
-GROUP BY 1
-ORDER BY 2 DESC;
-""")
-print("num partitions:", df.rdd.getNumPartitions())
-end = time.time()
-print("Runtime:", end - start, "seconds")
+input("\nCheck 'AQESkewedJoin' at http://localhost:4040. Press Enter to exit...")
+spark.stop()
