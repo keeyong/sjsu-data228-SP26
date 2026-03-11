@@ -2,6 +2,7 @@
 import mlflow
 import mlflow.sklearn
 from mlflow import MlflowClient
+from mlflow.models.signature import infer_signature
 from sklearn.datasets import load_files
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
@@ -90,10 +91,12 @@ for candidate in candidates:
 
         # Log the full sklearn Pipeline (vectorizer + classifier together).
         # This ensures the same preprocessing is always applied at inference time.
+        signature = infer_signature(X_train, candidate["pipeline"].predict(X_train))
         mlflow.sklearn.log_model(
             sk_model=candidate["pipeline"],
-            artifact_path="model",
-            registered_model_name="imdb-sentiment"
+            name="model",
+            registered_model_name="imdb-sentiment",
+            signature=signature,
         )
 
         run_results.append({
@@ -109,32 +112,12 @@ best = max(run_results, key=lambda x: x["f1_score"])
 print(f"\nBest model: {best['run_name']} (F1={best['f1_score']:.4f})")
 
 client = MlflowClient()
-client.set_registered_model_alias("imdb-sentiment", "champion", version="1")
-print("Alias 'champion' → version 1")
 
+versions = client.search_model_versions("name='imdb-sentiment'")
+best_version = next(
+    v.version for v in versions
+    if v.run_id == best["run_id"]
+)
 
-# ── STEP 5: SERVE AS REST API ─────────────────────────────────────────────────
-# Launch a local REST API server backed by the champion model.
-# Run this in a SEPARATE terminal:
-#
-#   mlflow models serve \
-#     -m "models:/imdb-sentiment@champion" \
-#     --host 0.0.0.0 --port 5002 --no-conda
-#
-# Then call it like this:
-
-def predict_sentiment(texts: list[str]) -> dict:
-    """Send review texts to the MLflow model server and get predictions."""
-    response = requests.post(
-        url="http://localhost:5001/invocations",
-        headers={"Content-Type": "application/json"},
-        data=json.dumps({"inputs": texts})
-    )
-    return response.json()
-
-# Example call (requires server to be running)
-# results = predict_sentiment([
-#     "This movie was amazing, I loved it!",
-#     "Terrible film, complete waste of time.",
-# ])
-# print(results)  # {"predictions": [1, 0]}
+client.set_registered_model_alias("imdb-sentiment", "champion", version=best_version)
+print(f"Alias 'champion' → version {best_version} ({best['run_name']})")
