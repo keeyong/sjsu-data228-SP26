@@ -50,8 +50,8 @@ def main():
         tune_config=tune.TuneConfig(
             metric="accuracy",
             mode="max",
-            num_samples=3,
-            max_concurrent_trials=1
+            num_samples=3,           # This is added to overcome memory issues
+            max_concurrent_trials=1  # This is added to overcome memory issues
         ),
     )
 
